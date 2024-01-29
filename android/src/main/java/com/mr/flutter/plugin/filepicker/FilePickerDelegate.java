@@ -1,5 +1,7 @@
 package com.mr.flutter.plugin.filepicker;
 
+import static androidx.core.app.ActivityCompat.startActivityForResult;
+
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
@@ -39,6 +41,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
     private String type;
     private String[] allowedExtensions;
     private EventChannel.EventSink eventSink;
+    private String imagePickerTitle;
 
     public FilePickerDelegate(final Activity activity) {
         this(
@@ -65,7 +68,11 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
     }
 
     @VisibleForTesting
-    FilePickerDelegate(final Activity activity, final MethodChannel.Result result, final PermissionManager permissionManager) {
+    FilePickerDelegate(
+            final Activity activity,
+            final MethodChannel.Result result,
+            final PermissionManager permissionManager
+    ) {
         this.activity = activity;
         this.pendingResult = result;
         this.permissionManager = permissionManager;
@@ -75,7 +82,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
     @Override
     public boolean onActivityResult(final int requestCode, final int resultCode, final Intent data) {
 
-        if(type == null) {
+        if (type == null) {
             return false;
         }
 
@@ -96,7 +103,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
                                 final Uri currentUri = data.getClipData().getItemAt(currentItem).getUri();
                                 final FileInfo file = FileUtils.openFileStream(FilePickerDelegate.this.activity, currentUri, loadDataToMemory);
 
-                                if(file != null) {
+                                if (file != null) {
                                     files.add(file);
                                     Log.d(FilePickerDelegate.TAG, "[MultiFilePick] File #" + currentItem + " - URI: " + currentUri.getPath());
                                 }
@@ -113,7 +120,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
                                 Log.d(FilePickerDelegate.TAG, "[SingleFilePick] File URI:" + uri.toString());
                                 final String dirPath = FileUtils.getFullPathFromTreeUri(uri, activity);
 
-                                if(dirPath != null) {
+                                if (dirPath != null) {
                                     finishWithSuccess(dirPath);
                                 } else {
                                     finishWithError("unknown_path", "Failed to retrieve directory path.");
@@ -123,7 +130,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
 
                             final FileInfo file = FileUtils.openFileStream(FilePickerDelegate.this.activity, uri, loadDataToMemory);
 
-                            if(file != null) {
+                            if (file != null) {
                                 files.add(file);
                             }
 
@@ -134,7 +141,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
                                 finishWithError("unknown_path", "Failed to retrieve path.");
                             }
 
-                        } else if (data.getExtras() != null){
+                        } else if (data.getExtras() != null) {
                             Bundle bundle = data.getExtras();
                             if (bundle.keySet().contains("selectedItems")) {
                                 ArrayList<Parcelable> fileUris = getSelectedItems(bundle);
@@ -210,8 +217,8 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
     }
 
     @SuppressWarnings("deprecation")
-    private ArrayList<Parcelable> getSelectedItems(Bundle bundle){
-        if(Build.VERSION.SDK_INT >= 33){
+    private ArrayList<Parcelable> getSelectedItems(Bundle bundle) {
+        if (Build.VERSION.SDK_INT >= 33) {
             return bundle.getParcelableArrayList("selectedItems", Parcelable.class);
         }
 
@@ -221,6 +228,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
     @SuppressWarnings("deprecation")
     private void startFileExplorer() {
         final Intent intent;
+        Intent intentChooser = null;
 
         // Temporary fix, remove this null-check after Flutter Engine 1.14 has landed on stable
         if (type == null) {
@@ -232,8 +240,9 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
         } else {
             if (type.equals("image/*")) {
                 intent = new Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                intentChooser = Intent.createChooser(intent, this.imagePickerTitle != null ? this.imagePickerTitle : "Select a photo");
             } else {
-                intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
             }
             final Uri uri = Uri.parse(Environment.getExternalStorageDirectory().getPath() + File.separator);
@@ -253,7 +262,11 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
         }
 
         if (intent.resolveActivity(this.activity.getPackageManager()) != null) {
-            this.activity.startActivityForResult(intent, REQUEST_CODE);
+            if (intentChooser != null) {
+                this.activity.startActivityForResult(intentChooser, REQUEST_CODE);
+            } else {
+                this.activity.startActivityForResult(intent, REQUEST_CODE);
+            }
         } else {
             Log.e(TAG, "Can't find a valid activity to handle the request. Make sure you've a file explorer installed.");
             finishWithError("invalid_format_type", "Can't handle the provided file type.");
@@ -261,7 +274,14 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
     }
 
     @SuppressWarnings("deprecation")
-    public void startFileExplorer(final String type, final boolean isMultipleSelection, final boolean withData, final String[] allowedExtensions, final MethodChannel.Result result) {
+    public void startFileExplorer(
+            final String type,
+            final boolean isMultipleSelection,
+            final boolean withData,
+            final String[] allowedExtensions,
+            final MethodChannel.Result result,
+            final String imagePickerTitle
+    ) {
 
         if (!this.setPendingMethodCallAndResult(result)) {
             finishWithAlreadyActiveError(result);
@@ -269,6 +289,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
         }
 
         this.type = type;
+        this.imagePickerTitle = imagePickerTitle;
         this.isMultipleSelection = isMultipleSelection;
         this.loadDataToMemory = withData;
         this.allowedExtensions = allowedExtensions;
@@ -292,10 +313,10 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
         // Temporary fix, remove this null-check after Flutter Engine 1.14 has landed on stable
         if (this.pendingResult != null) {
 
-            if(data != null && !(data instanceof String)) {
+            if (data != null && !(data instanceof String)) {
                 final ArrayList<HashMap<String, Object>> files = new ArrayList<>();
 
-                for (FileInfo file : (ArrayList<FileInfo>)data) {
+                for (FileInfo file : (ArrayList<FileInfo>) data) {
                     files.add(file.toMap());
                 }
                 data = files;
@@ -318,7 +339,7 @@ public class FilePickerDelegate implements PluginRegistry.ActivityResultListener
 
     private void dispatchEventStatus(final boolean status) {
 
-        if(eventSink == null || type.equals("dir")) {
+        if (eventSink == null || type.equals("dir")) {
             return;
         }
 
